@@ -1,0 +1,20 @@
+[package]
+name = "bookworm-pisa"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Local evidence-addressed knowledge records in the PISA shape (directive sections 14 and 15)."
+
+[dependencies]
+bookworm-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lib]
+doctest = false

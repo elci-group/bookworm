@@ -3,8 +3,10 @@
 //!
 //! Approximate character-based estimation is permitted for preflight
 //! screening but MUST NOT be represented as exact (§7). Accordingly,
-//! `estimated_tokens` always carries `estimation_method` and `exact_tokens`
-//! remains `None` until a real tokenizer integration lands (ROADMAP P1).
+//! `estimated_tokens` is always the character approximation and is labelled
+//! as such. `exact_tokens` is the `bookworm-ws-v1` count when the bytes are
+//! text. That count is exact for Bookworm's tokenizer and is not a
+//! third-party model count.
 
 use bookworm_classify::Language;
 use bookworm_core::{decode_text, Encoding};
@@ -12,8 +14,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 /// Approximate characters-per-token calibration by language family. These are
-/// screening constants, not model truth; the router replaces them with
-/// tokenizer-exact counts when reader integration lands.
+/// screening constants, not model truth. Structural budgets use
+/// `bookworm-ws-v1`. These figures stay the preflight estimate.
 fn chars_per_token(language: Option<Language>) -> f64 {
     match language {
         Some(Language::Json) | Some(Language::Toml) | Some(Language::Yaml) => 3.2,
@@ -36,16 +38,28 @@ pub struct Measurement {
     pub encoding: Encoding,
     pub estimated_tokens: Option<u64>,
     pub estimation_method: Option<String>,
-    /// Exact token count via the target tokenizer. Always `None` in v1.
+    /// Exact token count for [`bookworm_tokenize::METHOD`].
     pub exact_tokens: Option<u64>,
+    /// Tokenizer that produced `exact_tokens`. Never a third-party model name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exact_method: Option<String>,
 }
 
 /// Measure already-read bytes. `language` only tunes the token approximation.
 pub fn measure_bytes(bytes: &[u8], encoding: Encoding, language: Option<Language>) -> Measurement {
     let digest = hex::encode(Sha256::digest(bytes));
-    let (lines, chars) = match decode_text(bytes, encoding) {
-        Some(text) => (text.lines().count() as u64, text.chars().count() as u64),
-        None => (bytes.iter().filter(|b| **b == b'\n').count() as u64, 0),
+    let decoded = decode_text(bytes, encoding);
+    let (lines, chars, exact) = match &decoded {
+        Some(text) => (
+            text.lines().count() as u64,
+            text.chars().count() as u64,
+            Some(bookworm_tokenize::count(text)),
+        ),
+        None => (
+            bytes.iter().filter(|b| **b == b'\n').count() as u64,
+            0,
+            None,
+        ),
     };
     let estimated = (chars > 0).then(|| (chars as f64 / chars_per_token(language)).ceil() as u64);
     Measurement {
@@ -55,7 +69,8 @@ pub fn measure_bytes(bytes: &[u8], encoding: Encoding, language: Option<Language
         encoding,
         estimated_tokens: estimated,
         estimation_method: estimated.map(|_| APPROX_METHOD.to_string()),
-        exact_tokens: None,
+        exact_tokens: exact,
+        exact_method: exact.map(|_| bookworm_tokenize::METHOD.to_string()),
     }
 }
 
@@ -103,13 +118,16 @@ mod tests {
         );
         assert!(m.estimated_tokens.unwrap() > 0);
         assert_eq!(m.estimation_method.as_deref(), Some(APPROX_METHOD));
-        assert!(m.exact_tokens.is_none());
+        assert!(m.exact_tokens.unwrap() > 0);
+        assert_eq!(m.exact_method.as_deref(), Some(bookworm_tokenize::METHOD));
+        assert_ne!(m.estimation_method, m.exact_method);
     }
 
     #[test]
     fn binary_has_no_token_estimate() {
         let m = measure_bytes(&[0, 1, 2, 0, 3], Encoding::Binary, None);
         assert!(m.estimated_tokens.is_none());
+        assert!(m.exact_tokens.is_none());
         assert_eq!(m.lines, 0);
     }
 

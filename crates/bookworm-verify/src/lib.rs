@@ -4,12 +4,11 @@
 //! model: "Never spend another inference call debating something the machine
 //! can directly establish."
 //!
-//! v1 implements the initial capability list: path existence, text existence,
-//! line/range validation, symbol existence, dependency existence, manifest
-//! validation, Git revision verification and hash verification. The symbol
-//! check is honestly labelled `lexical_word_scan` — it is a word-boundary
-//! text scan, not AST symbol resolution, which arrives with structural
-//! integration (ROADMAP P2).
+//! Checks: path existence, text existence, line/range validation, symbol
+//! existence, import presence, configuration keys, dependency existence,
+//! manifest validation, Git revision verification and hash verification.
+//! Rust symbols use tree-sitter and are labelled `tree_sitter_symbol`.
+//! Other languages stay on the labelled lexical word scan.
 
 use bookworm_core::{decode_text, Encoding, Error, Result};
 use bookworm_measure::measure_file;
@@ -38,6 +37,16 @@ pub enum Check {
     SymbolExists {
         path: PathBuf,
         symbol: String,
+    },
+    /// A Rust `use` whose text contains `module`. Non-Rust files fail closed.
+    ImportExists {
+        path: PathBuf,
+        module: String,
+    },
+    /// Dotted key in a TOML or JSON document.
+    ConfigKey {
+        path: PathBuf,
+        key: String,
     },
     /// Dependency declared in a Cargo manifest (`dependencies`,
     /// `dev-dependencies` or `build-dependencies`).
@@ -76,6 +85,12 @@ impl Check {
             Check::SymbolExists { path, symbol } => {
                 format!("symbol_exists {symbol} in {}", path.display())
             }
+            Check::ImportExists { path, module } => {
+                format!("import_exists {module} in {}", path.display())
+            }
+            Check::ConfigKey { path, key } => {
+                format!("config_key {key} in {}", path.display())
+            }
             Check::DependencyExists { manifest, name } => {
                 format!("dependency_exists {name} in {}", manifest.display())
             }
@@ -92,6 +107,8 @@ impl Check {
             Check::TextExists { .. } => "text_exists",
             Check::LineRangeValid { .. } => "line_range_valid",
             Check::SymbolExists { .. } => "symbol_exists",
+            Check::ImportExists { .. } => "import_exists",
+            Check::ConfigKey { .. } => "config_key",
             Check::DependencyExists { .. } => "dependency_exists",
             Check::RevisionIs { .. } => "revision_is",
             Check::HashIs { .. } => "hash_is",
@@ -231,13 +248,51 @@ fn run_one(check: &Check) -> CheckResult {
                 "lexical_word_scan",
                 "target is not decodable text".to_string(),
             ),
+            Ok((_, _, Some(text))) => symbol_result(check, path, &text, symbol),
+        },
+        Check::ImportExists { path, module } => match read_text(path) {
+            Err(e) => result(check, false, "tree_sitter_import", format!("unreadable target: {e}")),
+            Ok((_, _, None)) => result(
+                check,
+                false,
+                "tree_sitter_import",
+                "target is not decodable text".to_string(),
+            ),
             Ok((_, _, Some(text))) => {
-                let n = count_word_occurrences(&text, symbol);
+                if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                    return result(
+                        check,
+                        false,
+                        "tree_sitter_import",
+                        "import resolution is implemented for Rust sources".to_string(),
+                    );
+                }
+                let parsed = bookworm_structure::parse(&text, Some("rust"));
+                let found = parsed.imports.iter().any(|i| i.text.contains(module));
                 result(
                     check,
-                    n > 0,
-                    "lexical_word_scan",
-                    format!("{n} word-boundary occurrence(s)"),
+                    found,
+                    "tree_sitter_import",
+                    format!(
+                        "method={} complete={} matches={found}",
+                        parsed.method, parsed.complete
+                    ),
+                )
+            }
+        },
+        Check::ConfigKey { path, key } => match std::fs::read_to_string(path) {
+            Err(e) => result(check, false, "config_lookup", format!("unreadable target: {e}")),
+            Ok(text) => {
+                let found = config_has_key(path, &text, key);
+                result(
+                    check,
+                    found,
+                    "config_lookup",
+                    if found {
+                        format!("key {key} present")
+                    } else {
+                        format!("key {key} absent or unsupported document")
+                    },
                 )
             }
         },
@@ -316,6 +371,73 @@ fn run_one(check: &Check) -> CheckResult {
             }
         },
     }
+}
+
+fn symbol_result(check: &Check, path: &PathBuf, text: &str, symbol: &str) -> CheckResult {
+    if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+        let parsed = bookworm_structure::parse(text, Some("rust"));
+        if parsed.method == "tree_sitter_rust" {
+            let found = parsed.symbols.iter().any(|s| s.name == symbol);
+            return result(
+                check,
+                found,
+                "tree_sitter_symbol",
+                format!(
+                    "complete={} found={found} symbols={}",
+                    parsed.complete,
+                    parsed.symbols.len()
+                ),
+            );
+        }
+    }
+    let n = count_word_occurrences(text, symbol);
+    result(
+        check,
+        n > 0,
+        "lexical_word_scan",
+        format!("{n} word-boundary occurrence(s)"),
+    )
+}
+
+fn config_has_key(path: &PathBuf, text: &str, key: &str) -> bool {
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("toml") => text
+            .parse::<toml::Value>()
+            .map(|value| toml_has(&value, key))
+            .unwrap_or(false),
+        Some("json") => serde_json::from_str::<serde_json::Value>(text)
+            .map(|value| json_has(&value, key))
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+
+fn toml_has(value: &toml::Value, key: &str) -> bool {
+    let mut current = value;
+    for part in key.split('.') {
+        match current {
+            toml::Value::Table(table) => match table.get(part) {
+                Some(next) => current = next,
+                None => return false,
+            },
+            _ => return false,
+        }
+    }
+    true
+}
+
+fn json_has(value: &serde_json::Value, key: &str) -> bool {
+    let mut current = value;
+    for part in key.split('.') {
+        match current {
+            serde_json::Value::Object(map) => match map.get(part) {
+                Some(next) => current = next,
+                None => return false,
+            },
+            _ => return false,
+        }
+    }
+    true
 }
 
 fn is_word_char(c: char) -> bool {
@@ -422,7 +544,7 @@ mod tests {
     #[test]
     fn symbol_scan_respects_word_boundaries() {
         let dir = scratch();
-        let f = dir.path().join("a.rs");
+        let f = dir.path().join("a.txt");
         write(&f, "fn foo() {}\nlet foobar = foo() + foobar;\n");
         let report = run(&[Check::SymbolExists {
             path: f,
@@ -434,6 +556,24 @@ mod tests {
             "detail was: {}",
             report.results[0].detail
         );
+    }
+
+    #[test]
+    fn rust_symbol_uses_tree_sitter() {
+        let dir = scratch();
+        let f = dir.path().join("a.rs");
+        write(&f, "fn foo() {}\nlet foobar = foo() + foobar;\n");
+        let report = run(&[Check::SymbolExists {
+            path: f.clone(),
+            symbol: "foo".into(),
+        }]);
+        assert_eq!(report.passed, 1);
+        assert_eq!(report.results[0].method, "tree_sitter_symbol");
+        let missing = run(&[Check::SymbolExists {
+            path: f,
+            symbol: "nope".into(),
+        }]);
+        assert_eq!(missing.failed, 1);
     }
 
     #[test]

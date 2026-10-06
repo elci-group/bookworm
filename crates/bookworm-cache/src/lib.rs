@@ -7,15 +7,18 @@
 //! NOT be considered valid merely because path == previous_path").
 //!
 //! Storage is a plain directory of JSON envelopes written atomically.
-//! Single-process use in v1; multi-agent locking arrives with locksmith
-//! integration (ROADMAP P5).
+//! Mutations take an exclusive advisory lock on `dir/.lock` so two processes
+//! do not interleave a rewrite. The lock is local to the machine.
 
 use bookworm_core::{Error, Result};
 use bookworm_evidence::{EvidenceEnvelope, HashEntry};
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+
+#[cfg(unix)]
+use std::os::unix::io::AsRawFd;
 
 #[derive(Debug, Clone)]
 pub struct EvidenceCache {
@@ -55,6 +58,14 @@ impl EvidenceCache {
         PathBuf::from(home).join(".cache").join("bookworm")
     }
 
+    pub fn directory(&self) -> &Path {
+        &self.dir
+    }
+
+    fn lock(&self, exclusive: bool) -> Result<CacheLock> {
+        CacheLock::acquire(&self.dir, exclusive)
+    }
+
     fn path_for(&self, request_id: &str) -> PathBuf {
         // request ids are generated hex; refuse anything path-shaped.
         let safe: String = request_id
@@ -66,6 +77,7 @@ impl EvidenceCache {
 
     /// Store an envelope atomically (temp file + rename).
     pub fn put(&self, envelope: &EvidenceEnvelope) -> Result<()> {
+        let _guard = self.lock(true)?;
         let final_path = self.path_for(&envelope.request_id);
         let tmp_path = self.dir.join(format!(
             ".{}.tmp",
@@ -85,11 +97,17 @@ impl EvidenceCache {
     }
 
     pub fn get(&self, request_id: &str) -> Option<EvidenceEnvelope> {
+        let _guard = self.lock(false).ok()?;
         let text = fs::read_to_string(self.path_for(request_id)).ok()?;
         EvidenceEnvelope::from_json(&text).ok()
     }
 
     pub fn entries(&self) -> Result<Vec<EntryMeta>> {
+        let _guard = self.lock(false)?;
+        self.entries_locked()
+    }
+
+    fn entries_locked(&self) -> Result<Vec<EntryMeta>> {
         let mut metas = Vec::new();
         let read = match fs::read_dir(&self.dir) {
             Ok(r) => r,
@@ -120,6 +138,11 @@ impl EvidenceCache {
 
     /// Remove one entry; returns true when an entry was removed.
     pub fn invalidate(&self, request_id: &str) -> Result<bool> {
+        let _guard = self.lock(true)?;
+        self.invalidate_locked(request_id)
+    }
+
+    fn invalidate_locked(&self, request_id: &str) -> Result<bool> {
         let path = self.path_for(request_id);
         match fs::remove_file(&path) {
             Ok(()) => Ok(true),
@@ -130,9 +153,10 @@ impl EvidenceCache {
 
     /// Remove every entry; returns how many were removed.
     pub fn clear(&self) -> Result<usize> {
+        let _guard = self.lock(true)?;
         let mut removed = 0;
-        for meta in self.entries()? {
-            if self.invalidate(&meta.request_id)? {
+        for meta in self.entries_locked()? {
+            if self.invalidate_locked(&meta.request_id)? {
                 removed += 1;
             }
         }
@@ -142,6 +166,40 @@ impl EvidenceCache {
 
 /// §15 validity: cached knowledge is valid only while the recorded evidence
 /// identity matches the current evidence identity. Any hash change invalidates.
+struct CacheLock {
+    file: File,
+}
+
+impl CacheLock {
+    fn acquire(dir: &Path, exclusive: bool) -> Result<Self> {
+        let path = dir.join(".lock");
+        let file = File::options()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(&path)
+            .map_err(|e| Error::io(&path, e))?;
+        #[cfg(unix)]
+        {
+            let flag = if exclusive { libc::LOCK_EX } else { libc::LOCK_SH };
+            let rc = unsafe { libc::flock(file.as_raw_fd(), flag) };
+            if rc != 0 {
+                return Err(Error::io(&path, std::io::Error::last_os_error()));
+            }
+        }
+        Ok(CacheLock { file })
+    }
+}
+
+impl Drop for CacheLock {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        unsafe {
+            libc::flock(self.file.as_raw_fd(), libc::LOCK_UN);
+        }
+    }
+}
+
 pub fn identity_matches(stored: &[HashEntry], current: &[HashEntry]) -> bool {
     if stored.len() != current.len() {
         return false;

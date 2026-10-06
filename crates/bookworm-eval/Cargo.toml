@@ -1,0 +1,17 @@
+[package]
+name = "bookworm-eval"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Evaluation harness over the deterministic Bookworm pipeline (directive section 21)."
+
+[dependencies]
+bookworm-cli = { path = "../bookworm-cli" }
+bookworm-core = { workspace = true }
+bookworm-structure = { workspace = true }
+bookworm-security = { workspace = true }
+serde = { workspace = true }
+
+[lib]
+doctest = false

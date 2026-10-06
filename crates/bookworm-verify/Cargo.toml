@@ -11,9 +11,11 @@ bookworm-core = { workspace = true }
 bookworm-classify = { workspace = true }
 bookworm-measure = { workspace = true }
 bookworm-resolver = { workspace = true }
+bookworm-structure = { workspace = true }
 regex = { workspace = true }
 toml = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

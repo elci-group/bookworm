@@ -10,6 +10,16 @@ members = [
     "crates/bookworm-verify",
     "crates/bookworm-evidence",
     "crates/bookworm-cache",
+    "crates/bookworm-tokenize",
+    "crates/bookworm-structure",
+    "crates/bookworm-security",
+    "crates/bookworm-telemetry",
+    "crates/bookworm-router",
+    "crates/bookworm-consensus",
+    "crates/bookworm-reader",
+    "crates/bookworm-pisa",
+    "crates/bookworm-server",
+    "crates/bookworm-eval",
     "crates/bookworm-cli",
 ]
 
@@ -30,6 +40,8 @@ walkdir = "2"
 regex = "1"
 tempfile = "3"
 libc = "0.2"
+tree-sitter = "0.24"
+tree-sitter-rust = "0.23"
 
 bookworm-core = { path = "crates/bookworm-core" }
 bookworm-policy = { path = "crates/bookworm-policy" }
@@ -40,6 +52,16 @@ bookworm-budget = { path = "crates/bookworm-budget" }
 bookworm-verify = { path = "crates/bookworm-verify" }
 bookworm-evidence = { path = "crates/bookworm-evidence" }
 bookworm-cache = { path = "crates/bookworm-cache" }
+bookworm-tokenize = { path = "crates/bookworm-tokenize" }
+bookworm-structure = { path = "crates/bookworm-structure" }
+bookworm-security = { path = "crates/bookworm-security" }
+bookworm-telemetry = { path = "crates/bookworm-telemetry" }
+bookworm-router = { path = "crates/bookworm-router" }
+bookworm-consensus = { path = "crates/bookworm-consensus" }
+bookworm-reader = { path = "crates/bookworm-reader" }
+bookworm-pisa = { path = "crates/bookworm-pisa" }
+bookworm-server = { path = "crates/bookworm-server" }
+bookworm-eval = { path = "crates/bookworm-eval" }
 
 [profile.release]
 lto = "thin"

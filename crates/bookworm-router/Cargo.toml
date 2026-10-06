@@ -1,0 +1,15 @@
+[package]
+name = "bookworm-router"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Deterministic ingestion routing. Model routing stays closed until a reader exists (directive sections 8 and 9)."
+
+[dependencies]
+bookworm-core = { workspace = true }
+bookworm-budget = { workspace = true }
+serde = { workspace = true }
+
+[lib]
+doctest = false

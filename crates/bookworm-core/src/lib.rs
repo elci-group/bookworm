@@ -52,6 +52,9 @@ pub enum Error {
     Cache {
         detail: String,
     },
+    PolicyDenied {
+        detail: String,
+    },
     Usage {
         detail: String,
     },
@@ -84,6 +87,7 @@ impl fmt::Display for Error {
             }
             Error::Verification { detail } => write!(f, "verification failure: {detail}"),
             Error::Cache { detail } => write!(f, "cache failure: {detail}"),
+            Error::PolicyDenied { detail } => write!(f, "policy denied: {detail}"),
             Error::Usage { detail } => write!(f, "usage error: {detail}"),
             Error::Io { source, path } => write!(f, "I/O error on {}: {source}", path.display()),
         }
@@ -344,15 +348,68 @@ impl VerificationPolicy {
     }
 }
 
-/// v1 is inference-free and therefore local-only by construction (§19).
+/// Local-only by default (§19). `redact_for_transport` applies when a caller
+/// asks for a package that would leave the machine. No remote reader is
+/// configured, so that package is still not transmitted.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PrivacyPolicy {
     pub local_only: bool,
+    pub redact_for_transport: bool,
 }
 
 impl Default for PrivacyPolicy {
     fn default() -> Self {
-        PrivacyPolicy { local_only: true }
+        PrivacyPolicy {
+            local_only: true,
+            redact_for_transport: true,
+        }
+    }
+}
+
+/// Consensus modes from directive §10. Only `None` and
+/// `VerifyOnDisagreement` are executable: the others need additional readers
+/// and are refused rather than simulated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConsensusMode {
+    None,
+    Dual,
+    Majority,
+    Heterogeneous,
+    Adversarial,
+    VerifyOnDisagreement,
+}
+
+impl ConsensusMode {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "none" => Some(ConsensusMode::None),
+            "dual" => Some(ConsensusMode::Dual),
+            "majority" => Some(ConsensusMode::Majority),
+            "heterogeneous" => Some(ConsensusMode::Heterogeneous),
+            "adversarial" => Some(ConsensusMode::Adversarial),
+            "verify_on_disagreement" => Some(ConsensusMode::VerifyOnDisagreement),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ConsensusMode::None => "NONE",
+            ConsensusMode::Dual => "DUAL",
+            ConsensusMode::Majority => "MAJORITY",
+            ConsensusMode::Heterogeneous => "HETEROGENEOUS",
+            ConsensusMode::Adversarial => "ADVERSARIAL",
+            ConsensusMode::VerifyOnDisagreement => "VERIFY_ON_DISAGREEMENT",
+        }
+    }
+
+    /// True when this process can honour the mode without another model.
+    pub fn executable(self) -> bool {
+        matches!(
+            self,
+            ConsensusMode::None | ConsensusMode::VerifyOnDisagreement
+        )
     }
 }
 
@@ -375,6 +432,14 @@ pub struct ContextRequest {
     pub verification: VerificationPolicy,
     pub privacy: PrivacyPolicy,
     pub freshness: FreshnessPolicy,
+    /// Consensus demand. Only `none` and `verify_on_disagreement` can run
+    /// in this process. The default is the high-assurance mode.
+    #[serde(default = "default_consensus")]
+    pub consensus: ConsensusMode,
+}
+
+fn default_consensus() -> ConsensusMode {
+    ConsensusMode::VerifyOnDisagreement
 }
 
 impl ContextRequest {
@@ -386,8 +451,9 @@ impl ContextRequest {
             fidelity: Fidelity::Lossless,
             budget: Budget::default(),
             verification: VerificationPolicy::Standard,
-            privacy: PrivacyPolicy::default(),
+            privacy: PrivacyPolicy::default(), // local_only, redact_for_transport
             freshness: FreshnessPolicy::Latest,
+            consensus: ConsensusMode::VerifyOnDisagreement,
         }
     }
 
@@ -470,14 +536,18 @@ impl Coverage {
 // ---------------------------------------------------------------------------
 
 /// A provenance span: path, 1-based inclusive line range, and the SHA-256 of
-/// the covered content. For v1 the hash is the whole-file blob hash; range
-/// fingerprints arrive with structural integration (§15).
+/// the whole file. `range_hash` is the SHA-256 of the exact source slice when
+/// the span is narrower than the file (§15).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EvidenceSpan {
     pub path: String,
     pub start_line: u64,
     pub end_line: u64,
+    /// Whole-file blob hash. Identity of the file the span was read from.
     pub hash: String,
+    /// SHA-256 of the bytes covering `start_line..=end_line`, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

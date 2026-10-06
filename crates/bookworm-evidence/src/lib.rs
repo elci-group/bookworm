@@ -85,8 +85,8 @@ pub struct StrategyBlock {
     pub classification: String,
     pub language: Option<String>,
     pub ingestion_strategy: String,
-    /// Reader model used for semantic acquisition; always `None` in the
-    /// inference-free v1 pipeline.
+    /// Name of the reader that produced the package. `deterministic` and
+    /// `structural` are local readers. `None` means no reader ran.
     pub reader_model: Option<String>,
     pub consensus_mode: String,
     pub coverage: Coverage,
@@ -158,6 +158,10 @@ pub struct EvidenceEnvelope {
     /// Served from the evidence cache against unchanged identity (§14/§15).
     /// Excluded from `result_hash`.
     pub cache_hit: bool,
+    /// `fresh`, `stale`, or `miss` from the local PISA store. Excluded from
+    /// `result_hash` so a lookup does not change evidence identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pisa_status: Option<String>,
     pub target: TargetIdentity,
     pub measurement: MeasurementBlock,
     pub strategy: StrategyBlock,
@@ -173,6 +177,7 @@ impl EvidenceEnvelope {
             request_id,
             timestamp_unix: None,
             cache_hit: false,
+            pisa_status: None,
             target,
             measurement: MeasurementBlock::default(),
             strategy: StrategyBlock {
@@ -206,6 +211,7 @@ impl EvidenceEnvelope {
         let mut canonical = self.clone();
         canonical.timestamp_unix = None;
         canonical.cache_hit = false;
+        canonical.pisa_status = None;
         canonical.identity.result_hash = String::new();
         let bytes = serde_json::to_vec(&canonical).expect("envelope serialization is total");
         hex::encode(Sha256::digest(&bytes))
@@ -295,6 +301,7 @@ mod tests {
         // Different timestamp and cache marker must not change the hash.
         b.timestamp_unix = Some(1);
         b.cache_hit = true;
+        b.pisa_status = Some("fresh".to_string());
         assert_eq!(a.identity.result_hash, b.compute_result_hash());
     }
 

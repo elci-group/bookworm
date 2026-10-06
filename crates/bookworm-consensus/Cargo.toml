@@ -1,0 +1,13 @@
+[package]
+name = "bookworm-consensus"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Claim-level adjudication. Deterministic checks dominate model voting (directive section 10)."
+
+[dependencies]
+bookworm-core = { workspace = true }
+
+[lib]
+doctest = false

@@ -1,14 +1,13 @@
 //! Deterministic target classification (directive §6).
 //!
-//! v1 is parser-free: classification rests on extension mapping, filename
-//! conventions, path conventions, shebang sniffing and NUL-byte binary
-//! detection. Every decision records its `basis` so a consumer can audit why
-//! a class was assigned (BW-I04). Where no deterministic signal exists, the
-//! class is `Unknown` rather than guessed (BW-I05).
+//! Classification rests on extension mapping, filename conventions, path
+//! conventions, shebang sniffing and NUL-byte binary detection. Every
+//! decision records its `basis` so a consumer can audit why a class was
+//! assigned (BW-I04). Where no deterministic signal exists, the class is
+//! `Unknown` rather than guessed (BW-I05).
 //!
-//! Structural parsing (tree-sitter) is directive-§6's preferred next step and
-//! is scheduled on the roadmap; it deliberately does not block this slice
-//! because v1 performs no semantic inference at all.
+//! Grammar-level structure lives in `bookworm-structure`. This crate does
+//! not infer meaning from the bytes.
 
 use bookworm_core::{decode_text, Encoding};
 use serde::{Deserialize, Serialize};

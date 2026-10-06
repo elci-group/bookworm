@@ -167,7 +167,10 @@ pub fn plan_lossless(
                     "estimated input {} tokens exceeds net context {} on {}",
                     est, account.net_available, model.name
                 ));
-                notes.push("partitioned read (tier 3) recommended; reader integration pending (ROADMAP P1)".to_string());
+                notes.push(
+                    "lossless read exceeds net context; structural extraction is attempted when symbols exist, and fixed-token chunking is refused"
+                        .to_string(),
+                );
             }
             if !fits_budget {
                 notes.push(format!(

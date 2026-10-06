@@ -1,0 +1,12 @@
+[package]
+name = "bookworm-tokenize"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Documented Bookworm tokenizer. Exact for this tokenizer only (directive section 7)."
+
+[dependencies]
+
+[lib]
+doctest = false

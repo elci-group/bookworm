@@ -9,6 +9,7 @@ description = "Deterministic measurement: bytes, lines, hashes, approximate toke
 [dependencies]
 bookworm-core = { workspace = true }
 bookworm-classify = { workspace = true }
+bookworm-tokenize = { workspace = true }
 serde = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }

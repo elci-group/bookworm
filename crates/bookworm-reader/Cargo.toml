@@ -1,0 +1,16 @@
+[package]
+name = "bookworm-reader"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Deterministic readers: lossless fit, structural extraction, extractive quotes (directive section 8)."
+
+[dependencies]
+bookworm-core = { workspace = true }
+bookworm-structure = { workspace = true }
+bookworm-tokenize = { workspace = true }
+serde = { workspace = true }
+
+[lib]
+doctest = false

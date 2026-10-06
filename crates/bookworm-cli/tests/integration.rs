@@ -70,9 +70,10 @@ fn read_envelope_is_deterministic_and_provenance_bound() {
 }
 
 #[test]
-fn oversized_target_reports_partial_with_unknown_coverage() {
-    // ~1.6 MB of text ≈ ~400k estimated tokens: far beyond every builtin
-    // model's net context.
+fn oversized_target_is_structural_and_not_exhaustive() {
+    // ~1.6 MB of text ≈ ~400k estimated tokens: far beyond the default
+    // model's net context. Whole symbols that fit are quoted. The file is
+    // not reported as a lossless read.
     let line = "fn pad() { let x = 1; let y = 2; let z = 3; }\n";
     let big: String = line.repeat(30_000);
     let (_dir, path) = fixture_file("big.rs", &big);
@@ -82,9 +83,10 @@ fn oversized_target_reports_partial_with_unknown_coverage() {
         env.output.status, "partial",
         "must not fabricate a lossless read"
     );
-    assert_eq!(env.strategy.coverage, Coverage::Unknown);
-    assert!(env.output.content.is_none());
-    assert!(!env.output.unknowns.is_empty());
+    assert_eq!(env.strategy.coverage, Coverage::Partial);
+    assert_ne!(env.strategy.coverage, Coverage::Exhaustive);
+    assert!(env.output.content.is_some());
+    assert!(env.strategy.ingestion_strategy.contains("tier2"));
     assert!(env
         .strategy
         .omissions
@@ -107,6 +109,7 @@ fn caller_token_ceiling_fails_closed() {
     let env = outcome.expect("read still assembles").envelope;
     assert_eq!(env.output.status, "partial");
     assert_eq!(env.strategy.coverage, Coverage::Unknown);
+    assert!(env.output.content.is_none());
 }
 
 #[test]
@@ -299,4 +302,138 @@ fn target_identity_reflects_resolution() {
     assert_eq!(identity.target_kind, "file");
     assert!(identity.canonical_path.ends_with("plain.txt"));
     assert!(identity.working_tree.is_none());
+}
+
+#[test]
+fn rust_read_records_tree_sitter_symbol_claims() {
+    let (_dir, path) = fixture_file("auth.rs", "pub fn issue() {}\n");
+    let env = read_envelope_for(&path);
+    assert!(env.output.claims.iter().any(|c| {
+        c.statement.contains("function issue")
+            && c.evidence.iter().any(|s| s.range_hash.is_some() && s.hash.len() == 64)
+    }));
+}
+
+#[test]
+fn trace_binds_reference_spans_to_file_hashes() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("auth.rs");
+    fs::write(&path, "pub fn issue() {}\npub fn caller() { issue(); }\n").unwrap();
+    let scope = ScopePolicy::unrestricted();
+    let opts = bookworm_cli::AcquireOpts {
+        model_name: "openai-gpt-4o",
+        max_tokens: None,
+        consensus: bookworm_core::ConsensusMode::VerifyOnDisagreement,
+        privacy: bookworm_core::PrivacyPolicy::default(),
+        scope: &scope,
+    };
+    let env = bookworm_cli::trace_symbol("issue", dir.path(), &opts).unwrap();
+    assert!(!env.output.findings.is_empty());
+    assert!(env.output.claims.iter().all(|c| {
+        c.evidence.iter().all(|s| s.hash.len() == 64)
+    }));
+}
+
+#[test]
+fn url_targets_are_denied() {
+    let err = bookworm_cli::guard_target(Path::new("https://example.com/a.rs")).unwrap_err();
+    assert!(matches!(err, Error::PolicyDenied { .. }));
+}
+
+#[test]
+fn non_executable_consensus_fails_closed() {
+    let cli = bookworm_cli::Cli {
+        json: true,
+        cache_dir: None,
+        no_cache: true,
+        root: None,
+        consensus: "dual".into(),
+        verify: "standard".into(),
+        local_only: true,
+        allow_remote: false,
+        model: "openai-gpt-4o".into(),
+        max_tokens: None,
+        provider: None,
+        command: bookworm_cli::Command::Doctor,
+    };
+    let err = bookworm_cli::run(&cli).unwrap_err();
+    assert!(matches!(err, Error::UnsupportedWithoutReader { .. }));
+}
+
+#[test]
+fn explain_quotes_source_and_does_not_paraphrase() {
+    let (_dir, path) = fixture_file("auth.rs", "/// issues a token\npub fn issue() {}\n");
+    let scope = ScopePolicy::unrestricted();
+    let opts = bookworm_cli::AcquireOpts {
+        model_name: "openai-gpt-4o",
+        max_tokens: None,
+        consensus: bookworm_core::ConsensusMode::VerifyOnDisagreement,
+        privacy: bookworm_core::PrivacyPolicy::default(),
+        scope: &scope,
+    };
+    let env = bookworm_cli::explain_file(&path, Some("why?"), &opts).unwrap();
+    let text = match &env.output.content {
+        Some(bookworm_evidence::ContentPayload::Text { text, .. }) => text.clone(),
+        other => panic!("expected quoted text, got {other:?}"),
+    };
+    assert!(text.contains("pub fn issue()"));
+    assert!(text.contains("/// issues a token"));
+    assert!(!text.to_ascii_lowercase().contains("this function"));
+    assert!(env
+        .output
+        .unknowns
+        .iter()
+        .any(|u| u.contains("does not paraphrase")));
+    assert!(env
+        .output
+        .unknowns
+        .iter()
+        .any(|u| u.contains("was not answered by a model")));
+}
+
+#[test]
+fn loopback_dispatch_reads_and_reports_health() {
+    use std::sync::{Arc, Mutex};
+    let scope = ScopePolicy::unrestricted();
+    let (_dir, path) = fixture_file("auth.rs", "pub fn issue() {}\n");
+    let state = bookworm_cli::ServiceState {
+        scope: &scope,
+        model: "openai-gpt-4o".into(),
+        max_tokens: None,
+        consensus: bookworm_core::ConsensusMode::None,
+        privacy: bookworm_core::PrivacyPolicy::default(),
+        verification: bookworm_core::VerificationPolicy::Standard,
+        cache_dir: None,
+        jobs: Arc::new(Mutex::new(std::collections::HashMap::new())),
+    };
+    let health = bookworm_server::HttpRequest {
+        method: "GET".into(),
+        path: "/v1/health".into(),
+        body: Vec::new(),
+        authorization: None,
+    };
+    let (status, body) = bookworm_cli::serve_request(&state, &health);
+    assert_eq!(status, 200);
+    assert_eq!(body["ok"], true);
+    assert_eq!(body["stream"], false);
+
+    let read = bookworm_server::HttpRequest {
+        method: "POST".into(),
+        path: "/v1/read".into(),
+        body: serde_json::json!({"target": path, "fidelity": "lossless"}).to_string().into_bytes(),
+        authorization: None,
+    };
+    let (status, body) = bookworm_cli::serve_request(&state, &read);
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["output"]["status"], "complete");
+    let id = body["request_id"].as_str().unwrap();
+    let jobs = bookworm_server::HttpRequest {
+        method: "GET".into(),
+        path: format!("/v1/claims/{id}"),
+        body: Vec::new(),
+        authorization: None,
+    };
+    let (status, claims) = bookworm_cli::serve_request(&state, &jobs);
+    assert_eq!(status, 200);
+    assert!(claims.as_array().unwrap().len() >= 1);
 }

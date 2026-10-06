@@ -20,6 +20,15 @@ bookworm-budget = { workspace = true }
 bookworm-verify = { workspace = true }
 bookworm-evidence = { workspace = true }
 bookworm-cache = { workspace = true }
+bookworm-tokenize = { workspace = true }
+bookworm-structure = { workspace = true }
+bookworm-security = { workspace = true }
+bookworm-telemetry = { workspace = true }
+bookworm-router = { workspace = true }
+bookworm-consensus = { workspace = true }
+bookworm-reader = { workspace = true }
+bookworm-pisa = { workspace = true }
+bookworm-server = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
