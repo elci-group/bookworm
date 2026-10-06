@@ -1,0 +1,23 @@
+[package]
+name = "bookworm-evidence"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "BOOKWORM/1 evidence envelope, provenance and result hashing (directive section 12)."
+
+[dependencies]
+bookworm-core = { workspace = true }
+bookworm-classify = { workspace = true }
+bookworm-measure = { workspace = true }
+bookworm-resolver = { workspace = true }
+bookworm-verify = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+# Tests are unit + integration only (see crates/bookworm-cli/tests); rustdoc
+# doctest execution is disabled so `cargo test` does not depend on rustdoc.
+[lib]
+doctest = false

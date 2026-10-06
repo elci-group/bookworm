@@ -1,0 +1,21 @@
+[package]
+name = "bookworm-cache"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Evidence-addressed cache with identity-based invalidation (directive sections 14, 15, 26)."
+
+[dependencies]
+bookworm-core = { workspace = true }
+bookworm-evidence = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+# Tests are unit + integration only (see crates/bookworm-cli/tests); rustdoc
+# doctest execution is disabled so `cargo test` does not depend on rustdoc.
+[lib]
+doctest = false

@@ -1,0 +1,4 @@
+{
+  "corpus": "bookworm-fixture-v1",
+  "classes": ["source_code", "structured_data", "natural_language", "log", "vendored", "generated", "binary"]
+}

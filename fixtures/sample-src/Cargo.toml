@@ -1,0 +1,10 @@
+[package]
+name = "sample-src"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = "1"
+
+[dev-dependencies]
+tempfile = "3"

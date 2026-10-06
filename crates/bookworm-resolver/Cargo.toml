@@ -1,0 +1,21 @@
+[package]
+name = "bookworm-resolver"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Target resolution and structural inventories: filesystem facts and Git identity (directive section 5)."
+
+[dependencies]
+bookworm-core = { workspace = true }
+bookworm-policy = { workspace = true }
+bookworm-classify = { workspace = true }
+walkdir = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+# Tests are unit + integration only (see crates/bookworm-cli/tests); rustdoc
+# doctest execution is disabled so `cargo test` does not depend on rustdoc.
+[lib]
+doctest = false

@@ -1,0 +1,34 @@
+[package]
+name = "bookworm-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Bookworm command-line interface (directive section 23)."
+
+[[bin]]
+name = "bookworm"
+path = "src/main.rs"
+
+[dependencies]
+bookworm-core = { workspace = true }
+bookworm-policy = { workspace = true }
+bookworm-classify = { workspace = true }
+bookworm-measure = { workspace = true }
+bookworm-resolver = { workspace = true }
+bookworm-budget = { workspace = true }
+bookworm-verify = { workspace = true }
+bookworm-evidence = { workspace = true }
+bookworm-cache = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+regex = { workspace = true }
+walkdir = { workspace = true }
+tempfile = { workspace = true }
+libc = { workspace = true }
+
+# Tests are unit + integration only (see crates/bookworm-cli/tests); rustdoc
+# doctest execution is disabled so `cargo test` does not depend on rustdoc.
+[lib]
+doctest = false

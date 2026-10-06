@@ -1,0 +1,45 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/bookworm-core",
+    "crates/bookworm-policy",
+    "crates/bookworm-classify",
+    "crates/bookworm-measure",
+    "crates/bookworm-resolver",
+    "crates/bookworm-budget",
+    "crates/bookworm-verify",
+    "crates/bookworm-evidence",
+    "crates/bookworm-cache",
+    "crates/bookworm-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+publish = false
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+hex = "0.4"
+clap = { version = "4", features = ["derive"] }
+toml = "0.8"
+walkdir = "2"
+regex = "1"
+tempfile = "3"
+libc = "0.2"
+
+bookworm-core = { path = "crates/bookworm-core" }
+bookworm-policy = { path = "crates/bookworm-policy" }
+bookworm-classify = { path = "crates/bookworm-classify" }
+bookworm-measure = { path = "crates/bookworm-measure" }
+bookworm-resolver = { path = "crates/bookworm-resolver" }
+bookworm-budget = { path = "crates/bookworm-budget" }
+bookworm-verify = { path = "crates/bookworm-verify" }
+bookworm-evidence = { path = "crates/bookworm-evidence" }
+bookworm-cache = { path = "crates/bookworm-cache" }
+
+[profile.release]
+lto = "thin"

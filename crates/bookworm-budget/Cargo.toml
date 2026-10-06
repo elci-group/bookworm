@@ -1,0 +1,16 @@
+[package]
+name = "bookworm-budget"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Token accounting (B_net) and ingestion-tier planning under budget constraints (directive sections 7, 8)."
+
+[dependencies]
+bookworm-core = { workspace = true }
+serde = { workspace = true }
+
+# Tests are unit + integration only (see crates/bookworm-cli/tests); rustdoc
+# doctest execution is disabled so `cargo test` does not depend on rustdoc.
+[lib]
+doctest = false
