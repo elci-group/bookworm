@@ -2,7 +2,7 @@
 
 Bookworm is the deterministic evidence-acquisition layer for ELCI. It resolves a target, measures it, classifies it, plans a budget, reads or searches it, verifies the measurement, and returns a `BOOKWORM/1` evidence envelope.
 
-This tree is version 0.1.0. The specification in [docs/DIRECTIVE.md](docs/DIRECTIVE.md) stays the spec. What this process actually does is recorded in [docs/STATUS.md](docs/STATUS.md).
+The release version is recorded in [VERSION](VERSION). The specification in [docs/DIRECTIVE.md](docs/DIRECTIVE.md) stays the spec. What this process actually does is recorded in [docs/STATUS.md](docs/STATUS.md).
 
 ## What a response is
 
@@ -12,7 +12,7 @@ Bookworm does not call a model. It does not paraphrase. `explain`, `summarise`, 
 
 ## What this process refuses
 
-- Model calls, provider clients, and network reads. A URL target is denied. `--allow-remote` fences and redacts a package and still does not transmit it.
+- Evidence acquisition does not make model calls, provider calls, or network reads. A URL target is denied. `--allow-remote` fences and redacts a package and still does not transmit it.
 - Exact token counts for GPT, Claude, Gemini, or any other third-party vocabulary. `estimated_tokens` is `approximate_chars_per_token`. `exact_tokens` is `bookworm-ws-v1` and is exact only for that tokenizer.
 - Consensus modes that need another reader (`dual`, `majority`, `heterogeneous`, `adversarial`). They return an error. `none` and `verify_on_disagreement` run. The default is `verify_on_disagreement`, which checks one deterministic reader and does not invent a second vote.
 - Fixed-token chunking. If a lossless read does not fit, Bookworm quotes whole symbols that fit and labels the coverage `partial` or `unknown`. A symbol larger than the budget is skipped, not sliced.
@@ -30,6 +30,7 @@ Rust symbols come from tree-sitter. Markdown uses heading lines. Other languages
 bookworm read|explain|summarise|extract|compare|trace|impact|locate|map
 bookworm measure|estimate|route|verify
 bookworm evidence|claims|cache|eval|doctor|serve
+bookworm update check|apply
 ```
 
 Global flags include `--json`, `--model`, `--budget` (alias of `--max-tokens`), `--consensus`, `--verify`, `--revision` on the commands that pin a revision, `--local-only`, `--allow-remote`, `--provider`, `--no-cache`, `--cache-dir`, and `--root`. `--provider` accepts `local` and `none`.
@@ -37,6 +38,17 @@ Global flags include `--json`, `--model`, `--budget` (alias of `--max-tokens`), 
 `read -` reads stdin. `read --lines START:END` is a separate request identity. `locate --glob` filters findings after a whole-scope scan.
 
 `bookworm eval [fixture]` runs the built-in checks. The default fixture is `fixtures/sample-src`.
+
+## Updating an installed Bookworm
+
+`bookworm update check` invokes Theosis to compare the installed Bookworm version with the Git remote. `bookworm update apply` explicitly asks Theosis to build and install a newer version through Baby. These commands are maintenance operations; evidence acquisition never invokes them. Theosis and Baby must be installed separately. The default binary is `~/.local/bin/bookworm`, and the default remote is this repository's GitHub origin. Use `--binary`, `--install-dir`, or `--remote` to override them.
+
+```text
+bookworm update check --json
+bookworm update apply
+```
+
+The root [.baby.toml](.baby.toml) tells Baby to build the `bookworm-cli` package and install its `bookworm` binary. Theosis uses the root `VERSION` file for remote version comparison, and `bookworm --version` reports the same version. The `check` command never installs anything; `apply` requires an explicit invocation.
 
 ## Local API
 

@@ -1,0 +1,5 @@
+schema = "baby.install/v1"
+build_system = "cargo"
+binary = "bookworm"
+artifact = "target/release/bookworm"
+commands = [["cargo", "build", "--release", "-p", "bookworm-cli", "--bin", "bookworm"]]

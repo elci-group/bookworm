@@ -26,8 +26,10 @@ use bookworm_resolver::{
 use bookworm_verify::{run as run_checks, Check, VerificationReport};
 use clap::{ArgAction, Parser, Subcommand};
 use serde::Serialize;
+use std::ffi::OsStr;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::Command as ProcessCommand;
 use walkdir::WalkDir;
 
 mod acquire;
@@ -39,7 +41,7 @@ pub use acquire::{
 };
 pub use service::{serve_request, ServiceState};
 
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const VERSION: &str = env!("BOOKWORM_VERSION");
 
 // ---------------------------------------------------------------------------
 // Command surface
@@ -48,8 +50,8 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 #[derive(Parser, Debug)]
 #[command(
     name = "bookworm",
-    version,
-    about = "Deterministic evidence acquisition, reading and context resolution (ELCI BOOKWORM/1)"
+    about = "Deterministic evidence acquisition, reading and context resolution (ELCI BOOKWORM/1)",
+    version = VERSION
 )]
 pub struct Cli {
     /// Emit machine-readable JSON (§23: all major functionality)
@@ -228,10 +230,43 @@ pub enum Command {
     },
     /// Environment self-checks
     Doctor,
+    /// Check for or explicitly apply a Bookworm update using Theosis
+    Update {
+        #[command(subcommand)]
+        action: UpdateAction,
+    },
     /// Run the built-in evaluation seed over a fixture tree (§21)
     Eval {
         #[arg(default_value = "fixtures/sample-src")]
         fixture: PathBuf,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum UpdateAction {
+    /// Check for an update without installing it
+    Check {
+        /// Git repository to check
+        #[arg(long)]
+        remote: Option<String>,
+        /// Installed Bookworm executable to compare
+        #[arg(long)]
+        binary: Option<PathBuf>,
+        /// Directory where an update would be installed
+        #[arg(long)]
+        install_dir: Option<PathBuf>,
+    },
+    /// Build and install an update
+    Apply {
+        /// Git repository to update from
+        #[arg(long)]
+        remote: Option<String>,
+        /// Installed Bookworm executable to replace
+        #[arg(long)]
+        binary: Option<PathBuf>,
+        /// Directory where the update should be installed
+        #[arg(long)]
+        install_dir: Option<PathBuf>,
     },
 }
 
@@ -259,6 +294,9 @@ fn parse_line_range(s: &str) -> std::result::Result<(u64, u64), String> {
 // ---------------------------------------------------------------------------
 
 pub fn run(cli: &Cli) -> Result<i32> {
+    if let Command::Update { action } = &cli.command {
+        return run_update(action, cli.json);
+    }
     bookworm_telemetry::record_request();
     reject_provider(cli.provider.as_deref())?;
     let consensus = consensus_or_err(&cli.consensus)?;
@@ -369,8 +407,92 @@ pub fn run(cli: &Cli) -> Result<i32> {
         Command::Claims { request_id } => cmd_claims(cli, request_id),
         Command::Cache { cmd } => cmd_cache(cli, cmd),
         Command::Doctor => cmd_doctor(cli),
+        Command::Update { .. } => unreachable!("update is dispatched before evidence preflight"),
         Command::Eval { fixture } => cmd_eval(cli, fixture),
     }
+}
+
+const OFFICIAL_REMOTE: &str = "https://github.com/elci-group/bookworm.git";
+
+fn run_update(action: &UpdateAction, json: bool) -> Result<i32> {
+    let (mode, remote, binary, install_dir) = match action {
+        UpdateAction::Check {
+            remote,
+            binary,
+            install_dir,
+        } => (
+            "check",
+            remote.as_deref(),
+            binary.as_deref(),
+            install_dir.as_deref(),
+        ),
+        UpdateAction::Apply {
+            remote,
+            binary,
+            install_dir,
+        } => (
+            "update",
+            remote.as_deref(),
+            binary.as_deref(),
+            install_dir.as_deref(),
+        ),
+    };
+    run_update_with(
+        OsStr::new("theosis"),
+        mode,
+        remote.unwrap_or(OFFICIAL_REMOTE),
+        binary,
+        install_dir,
+        json,
+    )
+}
+
+fn run_update_with(
+    theosis: &OsStr,
+    mode: &str,
+    remote: &str,
+    binary: Option<&Path>,
+    install_dir: Option<&Path>,
+    json: bool,
+) -> Result<i32> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let default_install_dir = home.as_ref().map(|home| home.join(".local/bin"));
+    let install_dir = install_dir
+        .or(default_install_dir.as_deref())
+        .ok_or_else(|| Error::Usage {
+            detail: "HOME is not set; pass --install-dir or set HOME".into(),
+        })?;
+    let default_binary = install_dir.join("bookworm");
+    let binary = binary.unwrap_or(&default_binary);
+
+    let state = if let Some(state) = std::env::var_os("THEOSIS_STATE") {
+        PathBuf::from(state)
+    } else {
+        let state_base = std::env::var_os("XDG_STATE_HOME")
+            .map(PathBuf::from)
+            .or_else(|| home.as_ref().map(|home| home.join(".local/state")))
+            .ok_or_else(|| Error::Usage {
+                detail: "HOME or XDG_STATE_HOME is required when THEOSIS_STATE is unset".into(),
+            })?;
+        state_base.join("bookworm/theosis")
+    };
+    let mut command = ProcessCommand::new(theosis);
+    command
+        .arg(mode)
+        .arg("--remote")
+        .arg(remote)
+        .arg("--binary")
+        .arg(binary)
+        .arg("--install-dir")
+        .arg(install_dir)
+        .env("THEOSIS_STATE", state);
+    if json {
+        command.arg("--json");
+    }
+    let status = command.status().map_err(|error| Error::Usage {
+        detail: format!("failed to run Theosis: {error}"),
+    })?;
+    Ok(status.code().unwrap_or(1))
 }
 
 fn cache_for(cli: &Cli) -> Result<Option<EvidenceCache>> {
@@ -2575,4 +2697,147 @@ fn print_human_envelope(env: &EvidenceEnvelope) {
     }
     println!("identity  : result_hash={}", env.identity.result_hash);
     println!("status    : {}", env.output.status);
+}
+
+#[cfg(test)]
+mod updater_tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn clap_version_comes_from_root_version_file_without_newline() {
+        assert_eq!(VERSION, include_str!("../../../VERSION").trim());
+        assert_eq!(Cli::command().get_version().unwrap(), VERSION);
+        assert!(!VERSION.ends_with('\n'));
+    }
+
+    #[test]
+    fn update_subcommands_parse_options_and_global_json() {
+        let check = Cli::try_parse_from([
+            "bookworm",
+            "--json",
+            "update",
+            "check",
+            "--remote",
+            "https://example.invalid/repo.git",
+            "--binary",
+            "/tmp/bookworm",
+            "--install-dir",
+            "/tmp/bin",
+        ])
+        .unwrap();
+        assert!(check.json);
+        assert!(matches!(
+            check.command,
+            Command::Update {
+                action: UpdateAction::Check { .. }
+            }
+        ));
+
+        let apply = Cli::try_parse_from(["bookworm", "update", "apply"]).unwrap();
+        assert!(matches!(
+            apply.command,
+            Command::Update {
+                action: UpdateAction::Apply { .. }
+            }
+        ));
+    }
+
+    #[cfg(unix)]
+    fn fake_theosis(exit_code: i32) -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let executable = dir.path().join("theosis-fake");
+        let arguments = dir.path().join("arguments.txt");
+        let state = dir.path().join("state.txt");
+        let script = format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nprintf '%s' \"$THEOSIS_STATE\" > '{}'\nexit {}\n",
+            arguments.display(), state.display(), exit_code
+        );
+        std::fs::write(&executable, script).unwrap();
+        let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&executable, permissions).unwrap();
+        (dir, executable, arguments, state)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn update_check_forwards_options_json_state_and_local_newer_exit_code() {
+        let (_dir, executable, arguments, state_file) = fake_theosis(10);
+        let binary = PathBuf::from("/custom/bin/bookworm");
+        let install_dir = PathBuf::from("/custom/bin");
+        let code = run_update_with(
+            executable.as_os_str(),
+            "check",
+            "https://example.invalid/bookworm.git",
+            Some(&binary),
+            Some(&install_dir),
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(code, 10, "LOCAL_NEWER must be propagated unchanged");
+        let args_text = std::fs::read_to_string(arguments).unwrap();
+        assert_eq!(
+            args_text.lines().collect::<Vec<_>>(),
+            [
+                "check",
+                "--remote",
+                "https://example.invalid/bookworm.git",
+                "--binary",
+                "/custom/bin/bookworm",
+                "--install-dir",
+                "/custom/bin",
+                "--json",
+            ]
+        );
+        let state_text = std::fs::read_to_string(state_file).unwrap();
+        let expected_state = std::env::var_os("THEOSIS_STATE")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("XDG_STATE_HOME")
+                    .map(PathBuf::from)
+                    .or_else(|| {
+                        std::env::var_os("HOME")
+                            .map(PathBuf::from)
+                            .map(|p| p.join(".local/state"))
+                    })
+                    .map(|base| base.join("bookworm/theosis"))
+            })
+            .unwrap();
+        assert_eq!(PathBuf::from(state_text), expected_state);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn update_apply_delegates_to_theosis_update_only_when_requested() {
+        let (_dir, executable, arguments, _) = fake_theosis(0);
+        let binary = PathBuf::from("/custom/bin/bookworm");
+        let install_dir = PathBuf::from("/custom/bin");
+        let code = run_update_with(
+            executable.as_os_str(),
+            "update",
+            OFFICIAL_REMOTE,
+            Some(&binary),
+            Some(&install_dir),
+            false,
+        )
+        .unwrap();
+        assert_eq!(code, 0);
+        let args_text = std::fs::read_to_string(arguments).unwrap();
+        assert_eq!(
+            args_text.lines().collect::<Vec<_>>(),
+            [
+                "update",
+                "--remote",
+                OFFICIAL_REMOTE,
+                "--binary",
+                "/custom/bin/bookworm",
+                "--install-dir",
+                "/custom/bin",
+            ]
+        );
+    }
 }

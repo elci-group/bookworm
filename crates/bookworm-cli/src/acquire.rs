@@ -44,7 +44,13 @@ pub fn explain_file(
     question: Option<&str>,
     opts: &AcquireOpts<'_>,
 ) -> Result<EvidenceEnvelope> {
-    let mut env = structural_quote(path, ReadIntent::Explain, Fidelity::Structural, opts, question)?;
+    let mut env = structural_quote(
+        path,
+        ReadIntent::Explain,
+        Fidelity::Structural,
+        opts,
+        question,
+    )?;
     env.output.unknowns.push(
         "explain returns structural evidence quoted from the source; Bookworm does not paraphrase"
             .to_string(),
@@ -129,7 +135,13 @@ pub fn extract_file(
     opts: &AcquireOpts<'_>,
 ) -> Result<EvidenceEnvelope> {
     let loaded = load_file(path, opts.scope)?;
-    let mut env = empty_envelope(&loaded, ReadIntent::Extract, Fidelity::Extractive, opts, symbol);
+    let mut env = empty_envelope(
+        &loaded,
+        ReadIntent::Extract,
+        Fidelity::Extractive,
+        opts,
+        symbol,
+    );
     let mut output = OutputBlock::default();
     let Some(text) = loaded.text.clone() else {
         output.status = "partial".to_string();
@@ -139,14 +151,12 @@ pub fn extract_file(
         env.strategy.coverage = Coverage::Unknown;
         return finish(&loaded, opts, env, output);
     };
-    let parsed = loaded
-        .parsed
-        .clone()
-        .unwrap_or_else(|| parse(&text, None));
+    let parsed = loaded.parsed.clone().unwrap_or_else(|| parse(&text, None));
     if let Some(name) = symbol {
         match parsed.symbols.iter().find(|s| s.name == name) {
             Some(symbol) => {
-                let slice = bookworm_structure::line_slice(&text, symbol.start_line, symbol.end_line);
+                let slice =
+                    bookworm_structure::line_slice(&text, symbol.start_line, symbol.end_line);
                 match slice {
                     Some(slice) => {
                         let tokens = bookworm_tokenize::count(&slice);
@@ -247,14 +257,17 @@ pub fn compare_files(
         imports: Vec::new(),
         notes: vec!["left target had no structural parse".into()],
     });
-    let right_parsed = right_loaded.parsed.clone().unwrap_or_else(|| FileStructure {
-        language: "unknown".into(),
-        method: "none".into(),
-        complete: false,
-        symbols: Vec::new(),
-        imports: Vec::new(),
-        notes: vec!["right target had no structural parse".into()],
-    });
+    let right_parsed = right_loaded
+        .parsed
+        .clone()
+        .unwrap_or_else(|| FileStructure {
+            language: "unknown".into(),
+            method: "none".into(),
+            complete: false,
+            symbols: Vec::new(),
+            imports: Vec::new(),
+            notes: vec!["right target had no structural parse".into()],
+        });
     let diff = diff_symbols(&left_parsed, &right_parsed);
     let mut req = ContextRequest::new(
         ReadIntent::Compare,
@@ -393,11 +406,7 @@ pub fn compare_files(
     Ok(env.finalize())
 }
 
-pub fn trace_symbol(
-    symbol: &str,
-    root: &Path,
-    opts: &AcquireOpts<'_>,
-) -> Result<EvidenceEnvelope> {
+pub fn trace_symbol(symbol: &str, root: &Path, opts: &AcquireOpts<'_>) -> Result<EvidenceEnvelope> {
     scan_symbol(symbol, root, opts, ReadIntent::Trace, false)
 }
 
@@ -440,12 +449,7 @@ fn scan_symbol(
                     continue;
                 }
             };
-            if entry.depth() > 0
-                && entry
-                    .path()
-                    .components()
-                    .any(|c| c.as_os_str() == ".git")
-            {
+            if entry.depth() > 0 && entry.path().components().any(|c| c.as_os_str() == ".git") {
                 continue;
             }
             if entry.file_type().is_file() {
@@ -464,7 +468,10 @@ fn scan_symbol(
         };
         files += 1;
         bytes += measurement.bytes;
-        hashes.insert(path.to_string_lossy().into_owned(), measurement.sha256.clone());
+        hashes.insert(
+            path.to_string_lossy().into_owned(),
+            measurement.sha256.clone(),
+        );
         let Some(text) = bookworm_core::decode_text(&raw, measurement.encoding) else {
             notes.push(format!("skipped non-text {}", path.display()));
             continue;
@@ -663,12 +670,9 @@ fn load_file(path: &Path, scope: &ScopePolicy) -> Result<Loaded> {
         measure_file(&resolved.canonical).map_err(|e| Error::io(&resolved.canonical, e))?;
     let classification = classify(&resolved.canonical, &bytes, measurement.encoding);
     let text = bookworm_core::decode_text(&bytes, measurement.encoding);
-    let parsed = text.as_ref().map(|body| {
-        parse(
-            body,
-            classification.language.map(|l| l.as_str()),
-        )
-    });
+    let parsed = text
+        .as_ref()
+        .map(|body| parse(body, classification.language.map(|l| l.as_str())));
     Ok(Loaded {
         resolved,
         measurement,
@@ -718,7 +722,10 @@ fn empty_envelope(
     };
     env.strategy = StrategyBlock {
         classification: loaded.classification.class.as_str().to_string(),
-        language: loaded.classification.language.map(|l| l.as_str().to_string()),
+        language: loaded
+            .classification
+            .language
+            .map(|l| l.as_str().to_string()),
         ingestion_strategy: bookworm_budget::IngestionTier::Tier2.as_str().to_string(),
         reader_model: Some("structural".to_string()),
         consensus_mode: opts.consensus.as_str().to_string(),
@@ -789,7 +796,12 @@ fn put_quote(
     }
 }
 
-fn push_symbol_claims(output: &mut OutputBlock, loaded: &Loaded, parsed: &FileStructure, cap: usize) {
+fn push_symbol_claims(
+    output: &mut OutputBlock,
+    loaded: &Loaded,
+    parsed: &FileStructure,
+    cap: usize,
+) {
     let limit = parsed.symbols.len().min(cap);
     let start = output.claims.len();
     for (i, symbol) in parsed.symbols.iter().take(limit).enumerate() {

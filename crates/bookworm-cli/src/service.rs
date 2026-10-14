@@ -30,12 +30,7 @@ pub struct ServiceState<'a> {
     pub jobs: Arc<Mutex<HashMap<String, Value>>>,
 }
 
-pub fn cmd_serve(
-    cli: &Cli,
-    bind: &str,
-    token: Option<&str>,
-    scope: &ScopePolicy,
-) -> Result<i32> {
+pub fn cmd_serve(cli: &Cli, bind: &str, token: Option<&str>, scope: &ScopePolicy) -> Result<i32> {
     let addr: SocketAddr = bind.parse().map_err(|_| Error::Usage {
         detail: format!("invalid bind address {bind:?}; expected host:port"),
     })?;
@@ -47,7 +42,8 @@ pub fn cmd_serve(
         max_tokens: cli.max_tokens,
         consensus: super::consensus_or_err(&cli.consensus)?,
         privacy: super::privacy_of(cli),
-        verification: VerificationPolicy::parse(&cli.verify).unwrap_or(VerificationPolicy::Standard),
+        verification: VerificationPolicy::parse(&cli.verify)
+            .unwrap_or(VerificationPolicy::Standard),
         cache_dir: if cli.no_cache {
             None
         } else {
@@ -81,7 +77,10 @@ pub fn serve_request(state: &ServiceState<'_>, req: &HttpRequest) -> (u16, Value
         );
     }
     if req.method == "GET" && path == "/v1/metrics" {
-        return (200, serde_json::to_value(bookworm_telemetry::snapshot()).unwrap_or(json!({})));
+        return (
+            200,
+            serde_json::to_value(bookworm_telemetry::snapshot()).unwrap_or(json!({})),
+        );
     }
     if req.method == "GET" {
         if let Some(id) = path.strip_prefix("/v1/jobs/") {
@@ -127,7 +126,14 @@ fn stored(state: &ServiceState<'_>, id: &str, claims_only: bool) -> (u16, Value)
     if let Ok(jobs) = state.jobs.lock() {
         if let Some(value) = jobs.get(id) {
             if claims_only {
-                return (200, value.get("output").and_then(|o| o.get("claims")).cloned().unwrap_or(json!([])));
+                return (
+                    200,
+                    value
+                        .get("output")
+                        .and_then(|o| o.get("claims"))
+                        .cloned()
+                        .unwrap_or(json!([])),
+                );
             }
             return (200, value.clone());
         }
@@ -136,7 +142,10 @@ fn stored(state: &ServiceState<'_>, id: &str, claims_only: bool) -> (u16, Value)
         if let Ok(cache) = bookworm_cache::EvidenceCache::open(dir) {
             if let Some(env) = cache.get(id) {
                 if claims_only {
-                    return (200, serde_json::to_value(&env.output.claims).unwrap_or(json!([])));
+                    return (
+                        200,
+                        serde_json::to_value(&env.output.claims).unwrap_or(json!([])),
+                    );
                 }
                 return (200, serde_json::to_value(&env).unwrap_or(json!({})));
             }
@@ -148,10 +157,14 @@ fn stored(state: &ServiceState<'_>, id: &str, claims_only: bool) -> (u16, Value)
 fn post_read(state: &ServiceState<'_>, body: &Value) -> Result<Value> {
     let target = required_str(body, "target")?;
     super::guard_target(Path::new(target))?;
-    let fidelity = Fidelity::parse(body.get("fidelity").and_then(|v| v.as_str()).unwrap_or("lossless"))
-        .ok_or_else(|| Error::Usage {
-            detail: "unknown fidelity".into(),
-        })?;
+    let fidelity = Fidelity::parse(
+        body.get("fidelity")
+            .and_then(|v| v.as_str())
+            .unwrap_or("lossless"),
+    )
+    .ok_or_else(|| Error::Usage {
+        detail: "unknown fidelity".into(),
+    })?;
     let model = bookworm_budget::find_model(&state.model).ok_or_else(|| Error::Usage {
         detail: format!("unknown model {}", state.model),
     })?;
@@ -181,7 +194,10 @@ fn post_locate(state: &ServiceState<'_>, body: &Value) -> Result<Value> {
     let root = body.get("root").and_then(|v| v.as_str()).unwrap_or(".");
     super::guard_target(Path::new(root))?;
     let regex = body.get("regex").and_then(|v| v.as_bool()).unwrap_or(false);
-    let max_results = body.get("max_results").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+    let max_results = body
+        .get("max_results")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(50) as usize;
     let outcome = locate(Path::new(root), pattern, regex, max_results)?;
     let env = locate_envelope_with(Path::new(root), pattern, &outcome, state.consensus);
     serde_json::to_value(&env).map_err(|e| Error::Usage {
@@ -328,9 +344,11 @@ fn open_cache(state: &ServiceState<'_>) -> Result<Option<bookworm_cache::Evidenc
 }
 
 fn required_str<'a>(body: &'a Value, key: &str) -> Result<&'a str> {
-    body.get(key).and_then(|v| v.as_str()).ok_or_else(|| Error::Usage {
-        detail: format!("missing string field {key}"),
-    })
+    body.get(key)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| Error::Usage {
+            detail: format!("missing string field {key}"),
+        })
 }
 
 fn string_list(body: &Value, key: &str) -> Vec<String> {
@@ -370,9 +388,9 @@ fn line_pair(value: Option<&Value>) -> Result<Option<(u64, u64)>> {
 fn status_for(err: &Error) -> u16 {
     match err {
         Error::TargetMissing { .. } => 404,
-        Error::PermissionDenied { .. } | Error::OutsideScope { .. } | Error::PolicyDenied { .. } => {
-            403
-        }
+        Error::PermissionDenied { .. }
+        | Error::OutsideScope { .. }
+        | Error::PolicyDenied { .. } => 403,
         _ => 400,
     }
 }

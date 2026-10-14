@@ -2,7 +2,7 @@
 
 Specification: [DIRECTIVE.md](DIRECTIVE.md), status **Proposed**. This file records the implemented process. It does not change the spec.
 
-Version: 0.1.0. Envelope: `BOOKWORM/1`.
+Version: [VERSION](../VERSION). Envelope: `BOOKWORM/1`.
 
 ## Implemented
 
@@ -18,6 +18,7 @@ Version: 0.1.0. Envelope: `BOOKWORM/1`.
 - Consensus: `none` and `verify_on_disagreement` only. One reader. Machine methods adjudicate if a second claim set is supplied to the library. The CLI does not invent that second set.
 - Evidence cache with advisory locking. Local PISA JSON store keyed by intent, fidelity, budget, and target.
 - Loopback HTTP API. Synchronous JSON. Metrics are process-local counters.
+- Explicit `bookworm update check|apply` maintenance commands delegate version comparison and installation to Theosis and Baby. They are outside evidence acquisition; `check` does not install.
 - `bookworm eval` and the `bookworm-eval` crate run one shared check list: measurement determinism, envelope determinism, negative-query coverage, provenance, cache invalidation, structural symbol, injection-as-content, scope, and budget fail-closed.
 
 ## Not implemented, on purpose
