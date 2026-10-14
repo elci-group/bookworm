@@ -10,6 +10,9 @@ description = "Loopback HTTP API for Bookworm evidence (directive section 24)."
 serde = { workspace = true }
 serde_json = { workspace = true }
 
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
 [dev-dependencies]
 serde_json = { workspace = true }
 

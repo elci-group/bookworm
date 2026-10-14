@@ -10,6 +10,7 @@ use std::io::{Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+#[cfg(any(test, not(unix)))]
 use std::thread;
 use std::time::Duration;
 
@@ -76,11 +77,37 @@ where
                 let _ = handle_one(stream, token.as_deref(), &mut handler);
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                thread::sleep(Duration::from_millis(20));
+                wait_for_connection(&listener).map_err(ServeError::Io)?;
             }
             Err(e) => return Err(ServeError::Io(e)),
         }
     }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn wait_for_connection(listener: &TcpListener) -> std::io::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    let mut descriptor = libc::pollfd {
+        fd: listener.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // Keep shutdown responsive while waking immediately when a client connects.
+    let result = unsafe { libc::poll(&mut descriptor, 1, 20) };
+    if result < 0 {
+        let error = std::io::Error::last_os_error();
+        if error.kind() != std::io::ErrorKind::Interrupted {
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn wait_for_connection(_listener: &TcpListener) -> std::io::Result<()> {
+    thread::sleep(Duration::from_millis(20));
     Ok(())
 }
 
