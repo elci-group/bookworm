@@ -1,0 +1,38 @@
+// Small loopback-only front end for comparing Tov transport with Bookworm's Rust API.
+// Run the Rust server separately, then set TOV_LISTEN_PORT / BOOKWORM_BACKEND_PORT as needed.
+const listenPort = parseInt(process.env.TOV_LISTEN_PORT ?? "8742") ?? 8742
+const backendPort = parseInt(process.env.BOOKWORM_BACKEND_PORT ?? "8741") ?? 8741
+const backend = `http://127.0.0.1:${backendPort}`
+
+const forwarded = new Set(["/v1/read", "/v1/locate", "/v1/explain", "/v1/map", "/v1/verify", "/v1/estimate"])
+
+async function route(req: Request): Promise<Response> {
+  const url = try new URL(req.url)
+  if (url.pathname === "/v1/health" && req.method === "GET") {
+    return Response.json({ status: "ok", transport: "tov" })
+  }
+  if (req.method !== "POST" || !forwarded.has(url.pathname)) {
+    return Response.json({ error: "not found" }, { status: 404 })
+  }
+
+  try {
+    const upstream = await fetch(backend + url.pathname + url.search, {
+      method: "POST",
+      headers: req.headers,
+      body: await req.text(),
+    })
+    const body = await upstream.text()
+    return new Response(body, {
+      status: upstream.status,
+      headers: { "content-type": upstream.headers.get("content-type") ?? "application/json" },
+    })
+  } catch (e) {
+    return Response.json({ error: "backend unavailable" }, { status: 502 })
+  }
+}
+
+Bun.serve({
+  port: listenPort,
+  hostname: "127.0.0.1",
+  fetch: route,
+})
